@@ -59,11 +59,11 @@ It keeps your workflow comfy and your files tidy.
 
 ---
 
-## Possible improvements (future)
+## Future & Contributions
 
-- Option to preserve file mtime on cleaning.
-- More advanced exclude filters (by path, frontmatter, etc.).
-- Multi-regex or tag-based exclusion.
+This plugin is intentionally minimal and "dumb" — it does one job, and does it well.
+If you have a feature request or want to contribute improvements, feel free to open an issue or pull request.
+I'm open to suggestions and extensions if anyone finds this plugin useful!
 
 ---
 
