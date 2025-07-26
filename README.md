@@ -1,94 +1,76 @@
-# Obsidian Sample Plugin
+# StickyEmptyLines
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+A minimal, robust Obsidian plugin to manage empty lines at the bottom of Markdown files.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+---
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open Sample Modal" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+## What does it do?
 
-## First time developing plugins?
+- **While editing:**  
+  Keeps _X_ empty lines at the end of every Markdown file in the editor, so you can easily click and type at the bottom.
+- **On switching files or tabs:**  
+  Cleans up and removes _all_ trailing empty lines at the end of the previous file, saving a tidy file to disk.
+- **Settings:**
+	- Choose how many empty lines are kept in the editor.
+	- Exclude files from processing by providing a regular expression filter.
+- **Respects manual edits:**  
+  If you manually add or remove blank lines while editing, the plugin won’t interfere until you switch files/tabs.
+- **No effect on empty lines in the middle of files.**
+- **Works only for Markdown files.**
 
-Quick starting guide for new plugin devs:
+---
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+## Settings
 
-## Releasing new releases
+- **Empty lines at bottom**  
+  Set the number of empty lines (0–20) to keep at the end of the file during editing.  
+  Default: `5`
+- **Exclude files containing (regex)**  
+  If a file's content matches this regex, it will be ignored by the plugin (no adding or cleaning of empty lines).
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+---
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+## Example scenarios
 
-## Adding your plugin to the community plugin list
+| Scenario                                            | What happens                                    |
+|-----------------------------------------------------|-------------------------------------------------|
+| Open a file with 0 blank lines at the end, X=5      | Adds 5 blank lines in the editor (not on disk)  |
+| Manually remove 2 of them                           | Plugin does **not** restore until you switch    |
+| Switch to another file/tab                          | Cleans all trailing blank lines and saves file  |
+| Add blank lines in the middle of the file           | Plugin does **not** touch them                  |
+| Change X in settings                                | Applies to current file immediately             |
+| File content matches exclude regex                  | Plugin ignores that file completely             |
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+---
 
-## How to use
+## Why?
 
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+If you like a "buffer" of empty lines for comfort while editing, but want clean, professional Markdown files without trailing blank lines on disk, this plugin is for you.  
+It keeps your workflow comfy and your files tidy.
 
-## Manually installing the plugin
+---
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+## Limitations
 
-## Improve code quality with eslint (optional)
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- To use eslint with this project, make sure to install eslint from terminal:
-  - `npm install -g eslint`
-- To use eslint to analyze this project use this command:
-  - `eslint main.ts`
-  - eslint will then create a report with suggestions for code improvement by file and line number.
-- If your source code is in a folder, such as `src`, you can use eslint with this command to analyze all files in that folder:
-  - `eslint .\src\`
+- Only one regex filter (case-sensitive).
+- Only works for `.md` files.
+- Does not resolve sync/merge conflicts.
+- Does not affect the file unless you open it in the editor.
 
-## Funding URL
+---
 
-You can include funding URLs where people who use your plugin can financially support it.
+## Possible improvements (future)
 
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
+- Option to preserve file mtime on cleaning.
+- More advanced exclude filters (by path, frontmatter, etc.).
+- Multi-regex or tag-based exclusion.
 
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
-```
+---
 
-If you have multiple URLs, you can also do:
+## License
 
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
-```
+MIT
 
-## API Documentation
+---
 
-See https://github.com/obsidianmd/obsidian-api
+*Simple, reliable, and as “dumb” as possible. For more power, fork and extend!*
