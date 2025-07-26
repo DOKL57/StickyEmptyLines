@@ -1,7 +1,7 @@
 {
 	"id": "sticky-empty-lines",
 	"name": "StickyEmptyLines",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"minAppVersion": "0.15.0",
 	"description": "Keeps X empty lines at the bottom of the file while editing and removes them when the file is closed. Clean files, comfortable editing.",
 	"author": "DOKL57",

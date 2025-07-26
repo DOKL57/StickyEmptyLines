@@ -1,174 +1,229 @@
-import { App, Plugin, PluginSettingTab, Setting, TFile, MarkdownView } from "obsidian";
+import {
+	App,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	TFile,
+	MarkdownView,
+	Editor,
+	WorkspaceLeaf,
+} from "obsidian";
 
 interface StickyEmptyLinesSettings {
-    emptyLines: number;
-    excludeRegex: string;
+	emptyLines: number;
+	excludeRegex: string;
 }
 
 const DEFAULT_SETTINGS: StickyEmptyLinesSettings = {
-    emptyLines: 5,
-    excludeRegex: "",
+	emptyLines: 5,
+	excludeRegex: "",
 };
 
 export default class StickyEmptyLinesPlugin extends Plugin {
-    settings: StickyEmptyLinesSettings;
-    private lastActiveFile: TFile | null = null;
+	settings: StickyEmptyLinesSettings;
+	private lastFile: TFile | null = null;
 
-    async onload() {
-        await this.loadSettings();
-        this.addSettingTab(new StickyEmptyLinesSettingTab(this.app, this));
+	async onload() {
+		await this.loadSettings();
+		this.addSettingTab(new StickyEmptyLinesSettingTab(this.app, this));
 
-        // Listen for all file/tab/editor changes
-        this.registerEvent(this.app.workspace.on("active-leaf-change", () => void this.onFileSwitch()));
-        this.registerEvent(this.app.workspace.on("file-open", () => void this.onFileSwitch()));
-        this.registerEvent(this.app.workspace.on("editor-change", () => void this.onFileSwitch()));
+		// Handle file switching, which covers opening new files.
+		this.registerEvent(
+			this.app.workspace.on("file-open", this.handleFileSwitch.bind(this))
+		);
 
-        // Initial application when the plugin loads
-        void this.onFileSwitch();
-    }
+		// Cleanup the last active file when Obsidian is closed.
+		this.onunload = () => {
+			this.cleanupFile(this.lastFile);
+		};
 
-    onunload() {
-        // Clean up the last active file on plugin unload
-        void this.cleanTrailingLines(this.lastActiveFile);
-    }
+		// Initial padding if a file is already open on plugin load.
+		const view = this.getActiveMarkdownView();
+		if (view && view.file) {
+			this.lastFile = view.file;
+			this.padEditorBottom(view.file, view.editor);
+		}
+	}
 
-    /**
-     * Called on every file/tab/editor switch:
-     * - Cleans trailing empty lines in the previous file (on disk)
-     * - Adds X empty lines in the editor of the new file (does not save)
-     */
-    private async onFileSwitch() {
-        // Clean previous file (if any)
-        await this.cleanTrailingLines(this.lastActiveFile);
+	/**
+	 * Cleans up the previously active file and pads the new one.
+	 * This is the central logic that runs when the user switches to a new file.
+	 */
+	private async handleFileSwitch(file: TFile | null) {
+		// Clean the file we are switching away from.
+		if (this.lastFile && this.lastFile.path !== file?.path) {
+			await this.cleanupFile(this.lastFile);
+		}
 
-        // Get current markdown view and editor
-        const mdView = this.getActiveMarkdownView();
-        const file = mdView?.file;
-        const editor = mdView?.editor;
+		this.lastFile = file;
 
-        // If file is valid and not excluded, add empty lines in editor
-        if (file && editor && file.extension === "md" && !(await this.shouldIgnoreFile(file))) {
-            const text = editor.getValue();
-            const missing = this.settings.emptyLines - countTrailingEmptyLines(text);
-            if (missing > 0) {
-                const pos = { line: editor.lineCount(), ch: 0 };
-                editor.replaceRange("\n".repeat(missing), pos, pos);
-            }
-        }
+		// Pad the newly opened file.
+		const view = this.getActiveMarkdownView();
+		if (file && view && (await this.shouldProcess(file))) {
+			await this.padEditorBottom(file, view.editor);
+		}
+	}
 
-        // Update the tracker for the next switch
-        this.lastActiveFile = file ?? null;
-    }
+	/**
+	 * Removes all trailing empty lines from a given file and saves it.
+	 */
+	private async cleanupFile(file: TFile | null) {
+		if (!file || !(await this.shouldProcess(file))) {
+			return;
+		}
 
-    /**
-     * Removes all trailing empty lines at the end of a file and saves the cleaned content.
-     */
-    private async cleanTrailingLines(file: TFile | null) {
-        if (!file || file.extension !== "md" || await this.shouldIgnoreFile(file)) return;
-        const content = await this.app.vault.read(file);
-        const cleaned = content.replace(/\n*$/g, "");
-        if (content !== cleaned) {
-            await this.app.vault.modify(file, cleaned);
-        }
-    }
+		const content = await this.app.vault.cachedRead(file);
+		const cleaned = removeTrailingEmptyLines(content);
 
-    /**
-     * Returns true if file should be excluded based on content regex.
-     */
-    private async shouldIgnoreFile(file: TFile): Promise<boolean> {
-        const { excludeRegex } = this.settings;
-        if (!excludeRegex) return false;
-        try {
-            const regex = new RegExp(excludeRegex);
-            const content = await this.app.vault.read(file);
-            return regex.test(content);
-        } catch (e) {
-            console.warn(`[StickyEmptyLines] Invalid regex: ${excludeRegex}`);
-            return false;
-        }
-    }
+		if (content !== cleaned) {
+			await this.app.vault.modify(file, cleaned);
+		}
+	}
 
-    /**
-     * Gets the currently active markdown view in source mode, or null.
-     */
-    private getActiveMarkdownView(): MarkdownView | null {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        // Only apply in source (edit) mode
-        // @ts-ignore: getMode may not exist in all API versions
-        if (!view || (view.getMode && view.getMode() !== "source")) return null;
-        return view;
-    }
+	/**
+	 * Check if a file should be processed based on its extension and the user's exclude regex.
+	 */
+	private async shouldProcess(file: TFile): Promise<boolean> {
+		if (file.extension !== "md") return false;
 
-    async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    }
-    async saveSettings() {
-        await this.saveData(this.settings);
-    }
+		const { excludeRegex } = this.settings;
+		if (!excludeRegex) return true;
+
+		try {
+			const regex = new RegExp(excludeRegex);
+			// Check against file path first, which is a common use case.
+			if (regex.test(file.path)) return false;
+
+			// Then check against content as described in the original plugin.
+			const content = await this.app.vault.cachedRead(file);
+			return !regex.test(content);
+		} catch (e) {
+			console.warn(`[StickyEmptyLines] Invalid regex: ${excludeRegex}`);
+			return true; // Fail open and process the file if regex is broken.
+		}
+	}
+
+	/**
+	 * Add missing empty lines at the bottom of the editor view.
+	 * This only affects the editor, not the file on disk.
+	 */
+	private async padEditorBottom(file: TFile, editor: Editor) {
+		const text = editor.getValue();
+		const trailing = countTrailingEmptyLines(text);
+		const needed = this.settings.emptyLines - trailing;
+
+		if (needed > 0) {
+			const pos = { line: editor.lineCount(), ch: 0 };
+			editor.replaceRange("\n".repeat(needed), pos, pos);
+		}
+	}
+
+	/**
+	 * Get the active Markdown view, ensuring it's in a mode with an editor.
+	 */
+	private getActiveMarkdownView(): MarkdownView | null {
+		return this.app.workspace.getActiveViewOfType(MarkdownView);
+	}
+
+	async loadSettings() {
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+	}
+	async saveSettings() {
+		await this.saveData(this.settings);
+	}
 }
 
 /**
- * Counts how many empty lines are at the end of the text.
+ * Counts the number of trailing empty lines in a string.
  */
 function countTrailingEmptyLines(text: string): number {
-    const lines = text.split("\n");
-    let count = 0;
-    for (let i = lines.length - 1; i >= 0; i--) {
-        if (lines[i].trim() === "") count++;
-        else break;
+	const match = text.match(/(\s*)$/);
+	if (!match) return 0;
+
+	const trailingWhitespace = match[1];
+	if (!trailingWhitespace.includes('\n')) return 0; // No newlines, so no empty lines.
+
+	// Split by newline and count empty strings from the end.
+	const lines = text.split("\n");
+	let count = 0;
+	for (let i = lines.length - 1; i >= 0; i--) {
+		if (lines[i].trim() === "") {
+			count++;
+		} else {
+			break;
+		}
+	}
+    // If the text ends with non-empty content, the last "line" isn't a trailing empty one.
+    // e.g. "hello\n", lines is ["hello", ""], count should be 1.
+    // e.g. "hello", lines is ["hello"], count should be 0.
+    if (lines.length > 1 && lines[lines.length-1].trim() === "") {
+        return count;
     }
-    return count;
+    // A special case for text that is only whitespace.
+    if (lines.length === count) {
+        return count;
+    }
+    return Math.max(0, count-1);
+}
+
+/**
+ * Removes all trailing empty lines and whitespace from a string.
+ */
+function removeTrailingEmptyLines(text: string): string {
+	return text.trimEnd();
 }
 
 class StickyEmptyLinesSettingTab extends PluginSettingTab {
-    plugin: StickyEmptyLinesPlugin;
+	plugin: StickyEmptyLinesPlugin;
 
-    constructor(app: App, plugin: StickyEmptyLinesPlugin) {
-        super(app, plugin);
-        this.plugin = plugin;
-    }
+	constructor(app: App, plugin: StickyEmptyLinesPlugin) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
 
-    display(): void {
-        const { containerEl } = this;
-        containerEl.empty();
-        containerEl.createEl("h2", { text: "StickyEmptyLines Settings" });
+	display(): void {
+		const { containerEl } = this;
+		containerEl.empty();
+		containerEl.createEl("h2", { text: "StickyEmptyLines Settings" });
 
-        // Numeric input for empty lines at the bottom (with validation)
-        new Setting(containerEl)
-            .setName("Empty lines at bottom")
-            .setDesc("Number of empty lines to keep at the end of the file while editing (0–20).")
-            .addText(text => {
-                text
-                    .setPlaceholder("5")
-                    .setValue(this.plugin.settings.emptyLines.toString())
-                    .onChange(async (value) => {
-                        let num = parseInt(value.replace(/[^0-9]/g, ""), 10);
-                        if (isNaN(num)) num = 0;
-                        if (num < 0) num = 0;
-                        if (num > 20) num = 20;
-                        this.plugin.settings.emptyLines = num;
-                        await this.plugin.saveSettings();
-                        await this.plugin.onFileSwitch();
-                        text.setValue(num.toString());
-                    });
-                text.inputEl.type = "number";
-                text.inputEl.min = "0";
-                text.inputEl.max = "20";
-                text.inputEl.style.width = "50px";
-            });
+		new Setting(containerEl)
+			.setName("Empty lines at bottom")
+			.setDesc(
+				"Number of empty lines to keep at the end of the file during editing (0–20)."
+			)
+			.addText((text) => {
+				text.inputEl.type = "number";
+				text.inputEl.min = "0";
+				text.inputEl.max = "20";
+				text.inputEl.style.width = "60px";
+				text
+					.setPlaceholder("5")
+					.setValue(this.plugin.settings.emptyLines.toString())
+					.onChange(async (value) => {
+						let num = parseInt(value, 10);
+						if (isNaN(num)) num = DEFAULT_SETTINGS.emptyLines;
 
-        // Regex filter for excluding files
-        new Setting(containerEl)
-            .setName("Exclude files containing (regex)")
-            .setDesc("If file content matches this regex, it will not be touched by the plugin. Example: ^---DO NOT TOUCH---")
-            .addText(text =>
-                text
-                    .setPlaceholder("e.g. ^---DO NOT TOUCH---")
-                    .setValue(this.plugin.settings.excludeRegex)
-                    .onChange(async (value) => {
-                        this.plugin.settings.excludeRegex = value;
-                        await this.plugin.saveSettings();
-                    })
-            );
-    }
+						num = Math.max(0, Math.min(num, 20)); // Clamp value
+
+						this.plugin.settings.emptyLines = num;
+						await this.plugin.saveSettings();
+						text.setValue(num.toString()); // Update UI to reflect sanitized value
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Exclude files (regex)")
+			.setDesc(
+				"Files with a path or content matching this regex will be ignored."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("e.g., Excalidraw/.+ or DO_NOT_TOUCH")
+					.setValue(this.plugin.settings.excludeRegex)
+					.onChange(async (value) => {
+						this.plugin.settings.excludeRegex = value;
+						await this.plugin.saveSettings();
+					})
+			);
+	}
 }
