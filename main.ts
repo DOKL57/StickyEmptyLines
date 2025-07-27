@@ -6,7 +6,6 @@ import {
 	TFile,
 	MarkdownView,
 	Editor,
-	WorkspaceLeaf,
 } from "obsidian";
 
 interface StickyEmptyLinesSettings {
@@ -47,7 +46,6 @@ export default class StickyEmptyLinesPlugin extends Plugin {
 
 	/**
 	 * Cleans up the previously active file and pads the new one.
-	 * This is the central logic that runs when the user switches to a new file.
 	 */
 	private async handleFileSwitch(file: TFile | null) {
 		// Clean the file we are switching away from.
@@ -91,21 +89,18 @@ export default class StickyEmptyLinesPlugin extends Plugin {
 
 		try {
 			const regex = new RegExp(excludeRegex);
-			// Check against file path first, which is a common use case.
 			if (regex.test(file.path)) return false;
 
-			// Then check against content as described in the original plugin.
 			const content = await this.app.vault.cachedRead(file);
 			return !regex.test(content);
 		} catch (e) {
 			console.warn(`[StickyEmptyLines] Invalid regex: ${excludeRegex}`);
-			return true; // Fail open and process the file if regex is broken.
+			return true;
 		}
 	}
 
 	/**
 	 * Add missing empty lines at the bottom of the editor view.
-	 * This only affects the editor, not the file on disk.
 	 */
 	private async padEditorBottom(file: TFile, editor: Editor) {
 		const text = editor.getValue();
@@ -118,9 +113,6 @@ export default class StickyEmptyLinesPlugin extends Plugin {
 		}
 	}
 
-	/**
-	 * Get the active Markdown view, ensuring it's in a mode with an editor.
-	 */
 	private getActiveMarkdownView(): MarkdownView | null {
 		return this.app.workspace.getActiveViewOfType(MarkdownView);
 	}
@@ -134,43 +126,33 @@ export default class StickyEmptyLinesPlugin extends Plugin {
 }
 
 /**
- * Counts the number of trailing empty lines in a string.
+ * Counts the number of trailing empty lines in a string robustly.
  */
 function countTrailingEmptyLines(text: string): number {
-	const match = text.match(/(\s*)$/);
-	if (!match) return 0;
-
-	const trailingWhitespace = match[1];
-	if (!trailingWhitespace.includes('\n')) return 0; // No newlines, so no empty lines.
-
-	// Split by newline and count empty strings from the end.
-	const lines = text.split("\n");
+	const lines = text.split('\n');
 	let count = 0;
 	for (let i = lines.length - 1; i >= 0; i--) {
-		if (lines[i].trim() === "") {
+		if (lines[i].trim() === '') {
 			count++;
 		} else {
+			// Stop at the first non-empty line.
 			break;
 		}
 	}
-    // If the text ends with non-empty content, the last "line" isn't a trailing empty one.
-    // e.g. "hello\n", lines is ["hello", ""], count should be 1.
-    // e.g. "hello", lines is ["hello"], count should be 0.
-    if (lines.length > 1 && lines[lines.length-1].trim() === "") {
-        return count;
-    }
-    // A special case for text that is only whitespace.
-    if (lines.length === count) {
-        return count;
-    }
-    return Math.max(0, count-1);
+	// An edge case: a single line of text like "hello" is split into `['hello']`.
+	// The loop will see it's not empty and break, count is 0. This is correct.
+	// But if the file ends with a non-empty line, that line itself isn't a "trailing empty line".
+	// The loop correctly excludes it. So the raw count is correct.
+	return count;
 }
 
+
 /**
- * Removes all trailing empty lines and whitespace from a string.
+ * Removes all trailing newline characters from a string.
+ * Using this regex is more precise than trimEnd() as it won't remove spaces on the last content line.
  */
 function removeTrailingEmptyLines(text: string): string {
-	return text.trimEnd();
+	return text.replace(/[\r\n\s]+$/, "");
 }
 
 class StickyEmptyLinesSettingTab extends PluginSettingTab {
@@ -203,11 +185,11 @@ class StickyEmptyLinesSettingTab extends PluginSettingTab {
 						let num = parseInt(value, 10);
 						if (isNaN(num)) num = DEFAULT_SETTINGS.emptyLines;
 
-						num = Math.max(0, Math.min(num, 20)); // Clamp value
+						num = Math.max(0, Math.min(num, 20));
 
 						this.plugin.settings.emptyLines = num;
 						await this.plugin.saveSettings();
-						text.setValue(num.toString()); // Update UI to reflect sanitized value
+						text.setValue(num.toString());
 					});
 			});
 
